@@ -61,7 +61,7 @@ async fn main() {
         engine.setoption("Hash", &config.hash.to_string()).await.unwrap();
         engine.setoption("Threads", &config.threads.to_string()).await.unwrap();
         if let Some(f) = config.engine_debug_file {
-            engine.setoption("Debug File", &f).await.unwrap();
+            engine.setoption("Debug Log File", &f).await.unwrap();
         }
         run(engine, config.limit).await.unwrap();
     }
