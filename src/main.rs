@@ -49,20 +49,23 @@ struct ConfigOptions {
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() {
+async fn main() -> Result<(), Box<dyn Error>> {
     let buf = tokio::fs::read_to_string("config.toml").await.unwrap_or_else(|e| panic!("Could not open config.toml: {e}"));
     let config: ConfigOptions = toml::from_str(&buf).expect("Unable to parse config.toml.");
 
     if config.random_moves {
         let mover = RandomMover::new();
-        run(mover, config.limit).await.unwrap();
+        run(mover, config.limit).await?;
     } else {
-        let mut engine = Engine::new(&config.engine_command).unwrap();
-        engine.setoption("Hash", &config.hash.to_string()).await.unwrap();
-        engine.setoption("Threads", &config.threads.to_string()).await.unwrap();
+        let mut engine = Engine::new(&config.engine_command)?;
+        
         if let Some(f) = config.engine_debug_file {
-            engine.setoption("Debug Log File", &f).await.unwrap();
+            engine.setoption("Debug Log File", &f).await?;
         }
-        run(engine, config.limit).await.unwrap();
+        engine.setoptions([("Hash", config.hash), ("Threads", config.threads)]).await?;
+        
+        run(engine, config.limit).await?;
     }
+
+    Ok(())
 }

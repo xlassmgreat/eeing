@@ -1,4 +1,4 @@
-use std::{process::Stdio, ops::Deref};
+use std::{process::Stdio, ops::Deref, fmt::Display};
 use serde::{Serialize, Deserialize};
 use shakmaty::{Chess, fen::Fen, Position, CastlingMode, san::San, EnPassantMode};
 use async_trait::async_trait;
@@ -76,7 +76,15 @@ impl Engine {
         Ok(())
     }
 
-    pub async fn setoption(&mut self, name: &str, value: &str) -> io::Result<()> {
+    pub async fn setoptions<S: Display, T: Display, I: IntoIterator<Item = (S, T)>>(&mut self, v: I) -> io::Result<()> {
+        for (name, value) in v.into_iter() {
+            self.writer.write_all(format!("setoption name {name} value {value}\n").as_bytes()).await?;
+        }
+        self.writer.flush().await?;
+        Ok(())
+    }
+
+    pub async fn setoption<T: Display>(&mut self, name: &str, value: T) -> io::Result<()> {
         self.send_single_line(format!("setoption name {name} value {value}\n")).await?;
         Ok(())
     }
