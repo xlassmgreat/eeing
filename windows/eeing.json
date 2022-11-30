@@ -1,0 +1,7 @@
+{
+  "name": "eeing",
+  "description": "Chess engine provider",
+  "path": "eeing.exe",
+  "type": "stdio",
+  "allowed_extensions": [ "chesscom@automove.org" ]
+}
