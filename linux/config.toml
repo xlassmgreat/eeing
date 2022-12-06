@@ -1,0 +1,5 @@
+random_moves = true
+engine_command = "stockfish"
+hash = 128
+threads = 2
+limit = {movetime = 1000}
