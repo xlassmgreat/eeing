@@ -16,6 +16,7 @@ pub struct Bestmove {
 pub enum Limit {
     Movetime(u32),
     Depth(u32),
+    Node(u32),
 }
 
 #[async_trait]
@@ -31,8 +32,10 @@ pub struct Engine {
 }
 
 impl Engine {
-    pub fn new(command: &str) -> io::Result<Self> {
-        let mut child = Command::new(command).stdin(Stdio::piped()).stdout(Stdio::piped()).spawn()?;
+    pub fn new(command: &str, args: Option<&Vec<String>>) -> io::Result<Self> {
+        let mut child = Command::new(command);
+        if let Some(args) = args {child.stdin(Stdio::piped()).stdout(Stdio::piped()).args(args);}
+        let mut child = child.spawn()?;
         let reader = BufReader::new(child.stdout.take().unwrap());
         let writer = BufWriter::new(child.stdin.take().unwrap());
 
@@ -53,6 +56,7 @@ impl Engine {
         match limit {
             Limit::Movetime(t) => self.send_single_line(format!("go movetime {t}\n")).await?,
             Limit::Depth(d) => self.send_single_line(format!("go depth {d}\n")).await?,
+            Limit::Node(n) => self.send_single_line(format!("go depth {n}\n")).await?,
         };
 
         let mut buf = String::new();
@@ -76,14 +80,7 @@ impl Engine {
         Ok(())
     }
 
-    pub async fn setoptions<S: Display, T: Display, I: IntoIterator<Item = (S, T)>>(&mut self, v: I) -> io::Result<()> {
-        for (name, value) in v.into_iter() {
-            self.writer.write_all(format!("setoption name {name} value {value}\n").as_bytes()).await?;
-        }
-        self.writer.flush().await?;
-        Ok(())
-    }
-
+    
     pub async fn setoption<T: Display>(&mut self, name: &str, value: T) -> io::Result<()> {
         self.send_single_line(format!("setoption name {name} value {value}\n")).await?;
         Ok(())

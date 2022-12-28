@@ -1,10 +1,11 @@
 mod engine;
 mod io;
-use std::error::Error;
+use std::{error::Error, collections::HashMap};
 
 use io::Plugin;
 use engine::{EnginePos, Engine, MovePlayer, RandomMover, Limit};
 use serde::Deserialize;
+use toml::Value;
 
 async fn run<T: MovePlayer>(mut mover: T, limit: Limit) -> Result<(), Box<dyn Error>> {
     let mut plugin = Plugin::new();
@@ -39,13 +40,18 @@ async fn run<T: MovePlayer>(mut mover: T, limit: Limit) -> Result<(), Box<dyn Er
 }
 
 #[derive(Deserialize)]
+struct Eng {
+    command: String,
+    args: Option<Vec<String>>,
+    config: Option<HashMap<String, Value>>
+}
+
+
+#[derive(Deserialize)]
 struct ConfigOptions {
     random_moves: bool,
-    engine_command: String,
+    engine: Eng,
     limit: Limit,
-    hash: u32,
-    threads: u32,
-    engine_debug_file: Option<String>,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -57,13 +63,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let mover = RandomMover::new();
         run(mover, config.limit).await?;
     } else {
-        let mut engine = Engine::new(&config.engine_command)?;
+        let mut engine = Engine::new(&config.engine.command, config.engine.args.as_ref())?;
         
-        if let Some(f) = config.engine_debug_file {
-            engine.setoption("Debug Log File", &f).await?;
+        if let Some(config) = &config.engine.config {
+            for (key, value) in config {
+                engine.setoption(key, value).await?;
+            }
         }
-        engine.setoptions([("Hash", config.hash), ("Threads", config.threads)]).await?;
-        
         run(engine, config.limit).await?;
     }
 
