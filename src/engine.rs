@@ -1,8 +1,7 @@
 use std::{process::Stdio, ops::Deref, fmt::Display};
 use serde::{Serialize, Deserialize};
 use shakmaty::{Chess, fen::Fen, Position, CastlingMode, san::San, EnPassantMode};
-use async_trait::async_trait;
-use tokio::{process::{Child, ChildStdout, ChildStdin, Command}, io::{self, BufReader, BufWriter, AsyncBufReadExt, AsyncWriteExt}};
+use std::{process::{Child, ChildStdout, ChildStdin, Command}, io::{self, BufReader, BufWriter, BufRead, Write}};
 use rand::Rng;
 
 #[derive(Serialize)]
@@ -19,10 +18,9 @@ pub enum Limit {
     Node(u32),
 }
 
-#[async_trait]
 pub trait MovePlayer {
-    async fn bestmove(&mut self, limit: Limit) -> Bestmove;
-    async fn pos(&mut self, pos: &EnginePos);
+    fn bestmove(&mut self, limit: Limit) -> Bestmove;
+    fn pos(&mut self, pos: &EnginePos);
 }
 
 pub struct Engine {
@@ -42,26 +40,26 @@ impl Engine {
         Ok(Engine {_child: child, reader, writer})
     }
 
-    async fn read_line(&mut self, buf: &mut String) -> io::Result<usize> {
-        self.reader.read_line(buf).await
+    fn read_line(&mut self, buf: &mut String) -> io::Result<usize> {
+        self.reader.read_line(buf)
     }
 
-    async fn send_single_line(&mut self, s: String) -> io::Result<()> {
-        self.writer.write(s.as_bytes()).await?;
-        self.writer.flush().await?;
+    fn send_single_line(&mut self, s: String) -> io::Result<()> {
+        self.writer.write(s.as_bytes())?;
+        self.writer.flush()?;
         Ok(())
     }
 
-    async fn go(&mut self, limit: Limit) -> io::Result<Bestmove> {
+    fn go(&mut self, limit: Limit) -> io::Result<Bestmove> {
         match limit {
-            Limit::Movetime(t) => self.send_single_line(format!("go movetime {t}\n")).await?,
-            Limit::Depth(d) => self.send_single_line(format!("go depth {d}\n")).await?,
-            Limit::Node(n) => self.send_single_line(format!("go depth {n}\n")).await?,
+            Limit::Movetime(t) => self.send_single_line(format!("go movetime {t}\n"))?,
+            Limit::Depth(d) => self.send_single_line(format!("go depth {d}\n"))?,
+            Limit::Node(n) => self.send_single_line(format!("go depth {n}\n"))?,
         };
 
         let mut buf = String::new();
         loop {
-            self.read_line(&mut buf).await?;
+            self.read_line(&mut buf)?;
             let mut words = buf[0..(buf.len()-1)].split(' ');
             if let Some("bestmove") = words.next() {
                 match words.collect::<Vec<&str>>()[..] {
@@ -74,27 +72,26 @@ impl Engine {
         }
     }
 
-    async fn update_pos(&mut self, pos: &EnginePos) -> io::Result<()> {
+    fn update_pos(&mut self, pos: &EnginePos) -> io::Result<()> {
         let fen = Fen::from_position((*pos).clone(), EnPassantMode::Legal);
-        self.send_single_line(format!("position fen {fen}\n")).await?;
+        self.send_single_line(format!("position fen {fen}\n"))?;
         Ok(())
     }
 
     
-    pub async fn setoption<T: Display>(&mut self, name: &str, value: T) -> io::Result<()> {
-        self.send_single_line(format!("setoption name {name} value {value}\n")).await?;
+    pub fn setoption<T: Display>(&mut self, name: &str, value: T) -> io::Result<()> {
+        self.send_single_line(format!("setoption name {name} value {value}\n"))?;
         Ok(())
     }
 }
 
-#[async_trait]
 impl MovePlayer for Engine {
-    async fn bestmove(&mut self, limit: Limit) -> Bestmove {
-        self.go(limit).await.unwrap()
+    fn bestmove(&mut self, limit: Limit) -> Bestmove {
+        self.go(limit).unwrap()
     }
 
-    async fn pos(&mut self, pos: &EnginePos) {
-        self.update_pos(pos).await.unwrap();
+    fn pos(&mut self, pos: &EnginePos) {
+        self.update_pos(pos).unwrap();
     }
 }
 
@@ -136,9 +133,9 @@ impl RandomMover {
     }
 }
 
-#[async_trait]
+
 impl MovePlayer for RandomMover {
-    async fn bestmove(&mut self, _limit: Limit) -> Bestmove {
+    fn bestmove(&mut self, _limit: Limit) -> Bestmove {
         let gen = |pos: &Chess| {
             let mut moves = pos.legal_moves();
             let r = rand::thread_rng().gen_range(0..moves.len());
@@ -154,7 +151,7 @@ impl MovePlayer for RandomMover {
         Bestmove {bestmove: bm, pondermove: pm}
     }
 
-    async fn pos(&mut self, pos: &EnginePos) {
+    fn pos(&mut self, pos: &EnginePos) {
         self.pos = (*pos).clone();
     }
 }
