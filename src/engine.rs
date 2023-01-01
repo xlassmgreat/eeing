@@ -1,8 +1,12 @@
-use std::{process::Stdio, ops::Deref, fmt::Display};
+use std::{
+    process::{Stdio, Child, ChildStdout, ChildStdin, Command},
+    io::{self, BufReader, BufWriter, BufRead, Write},
+    ops::Deref,
+    fmt::Display,
+};
 use serde::{Serialize, Deserialize};
 use shakmaty::{Chess, fen::Fen, Position, CastlingMode, san::San, EnPassantMode};
-use std::{process::{Child, ChildStdout, ChildStdin, Command}, io::{self, BufReader, BufWriter, BufRead, Write}};
-use rand::Rng;
+use rand::{Rng, rngs::ThreadRng};
 
 #[derive(Serialize)]
 pub struct Bestmove {
@@ -32,7 +36,8 @@ pub struct Engine {
 impl Engine {
     pub fn new(command: &str, args: Option<&Vec<String>>) -> io::Result<Self> {
         let mut child = Command::new(command);
-        if let Some(args) = args {child.stdin(Stdio::piped()).stdout(Stdio::piped()).args(args);}
+        child.stdin(Stdio::piped()).stdout(Stdio::piped());
+        if let Some(args) = args {child.args(args);}
         let mut child = child.spawn()?;
         let reader = BufReader::new(child.stdout.take().unwrap());
         let writer = BufWriter::new(child.stdin.take().unwrap());
@@ -125,20 +130,21 @@ impl Deref for EnginePos {
 
 pub struct RandomMover{
     pos: Chess,
+    rng: ThreadRng,
 }
 
 impl RandomMover {
     pub fn new() -> Self {
-        RandomMover {pos: Chess::new()}
+        RandomMover {pos: Chess::new(), rng: rand::thread_rng()}
     }
 }
 
 
 impl MovePlayer for RandomMover {
     fn bestmove(&mut self, _limit: Limit) -> Bestmove {
-        let gen = |pos: &Chess| {
+        let mut gen = |pos: &Chess| {
             let mut moves = pos.legal_moves();
-            let r = rand::thread_rng().gen_range(0..moves.len());
+            let r = self.rng.gen_range(0..moves.len());
             moves.pop_at(r)
         };
 
