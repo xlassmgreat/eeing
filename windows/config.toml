@@ -1,5 +1,9 @@
-random_moves = true
-engine_command = "C:\Users\username\path\to\stockfish.exe"
-hash = 128
-threads = 2
 limit = {movetime = 1000}
+random_moves = false
+
+[engine]
+command = "stockfish"
+
+[engine.config]
+threads = 2
+hash = 128
