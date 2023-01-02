@@ -22,11 +22,15 @@ The configuration is done via a TOML file called `config.toml` which is expected
 This is a basic example which you can use:
 
 ```toml
-random_moves = true
-engine_command = "stockfish"
-hash = 128
-threads = 2
 limit = {movetime = 1000}
+random_moves = false
+
+[engine]
+command = "stockfish"
+
+[engine.config]
+threads = 2
+hash = 128
 ```
 Make a new file in the directory called `config.toml` and paste the above to get started.
 
