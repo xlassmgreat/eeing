@@ -66,7 +66,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         
         if let Some(config) = &config.engine.config {
             for (key, value) in config {
-                engine.setoption(key, value)?;
+                let key = key.replace("_", " ");
+                engine.setoption(&key, value)?;
             }
         }
         run(engine, config.limit)?;
