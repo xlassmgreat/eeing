@@ -1,17 +1,53 @@
+use derive_more::{Deref, DerefMut};
+use serde::{Deserialize, Serialize};
+use shakmaty::{fen::Fen, san::San, CastlingMode, Chess, EnPassantMode, Position};
 use std::{
-    process::{Stdio, Child, ChildStdout, ChildStdin, Command},
-    io::{self, BufReader, BufWriter, BufRead, Write},
-    ops::Deref,
     fmt::Display,
+    io::{self, BufRead, BufReader, BufWriter, Write},
+    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
 };
-use serde::{Serialize, Deserialize};
-use shakmaty::{Chess, fen::Fen, Position, CastlingMode, san::San, EnPassantMode};
-use rand::{Rng, rngs::ThreadRng};
 
 #[derive(Serialize)]
 pub struct Bestmove {
     pub bestmove: String,
     pub pondermove: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Info {
+    raw: String,
+    // More fields with some parsing expected in the future
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum EngSend {
+    Bestmove(Bestmove),
+    Info(Info),
+}
+
+impl From<&str> for EngSend {
+    fn from(value: &str) -> Self {
+        let mut words = value.split(' ');
+        if let Some("bestmove") = words.next() {
+            match words.collect::<Vec<&str>>()[..] {
+                [bm, "pondermove", pm] => EngSend::Bestmove(Bestmove {
+                    bestmove: bm.to_owned(),
+                    pondermove: pm.to_owned(),
+                }),
+                [bm, ..] => EngSend::Bestmove(Bestmove {
+                    bestmove: bm.to_owned(),
+                    pondermove: String::new(),
+                }),
+                _ => panic!("Engine output wrong"),
+            }
+        } else {
+            EngSend::Info(Info {
+                raw: value.to_owned(),
+            })
+        }
+    }
 }
 
 #[derive(Deserialize, Clone, Copy)]
@@ -22,142 +58,107 @@ pub enum Limit {
     Node(u32),
 }
 
-pub trait MovePlayer {
-    fn bestmove(&mut self, limit: Limit) -> Bestmove;
-    fn pos(&mut self, pos: &EnginePos);
-}
+pub struct EngineInput(BufWriter<ChildStdin>);
+pub struct EngineOutput(BufReader<ChildStdout>);
 
-pub struct Engine {
-    _child: Child,
-    reader: BufReader<ChildStdout>,
-    writer: BufWriter<ChildStdin>,
-}
-
-impl Engine {
-    pub fn new(command: &str, args: Option<&Vec<String>>) -> io::Result<Self> {
-        let mut child = Command::new(command);
-        child.stdin(Stdio::piped()).stdout(Stdio::piped());
-        if let Some(args) = args {child.args(args);}
-        let mut child = child.spawn()?;
-        let reader = BufReader::new(child.stdout.take().unwrap());
-        let writer = BufWriter::new(child.stdin.take().unwrap());
-
-        Ok(Engine {_child: child, reader, writer})
+impl EngineInput {
+    fn new(stdin: ChildStdin) -> Self {
+        Self(BufWriter::new(stdin))
     }
 
-    fn read_line(&mut self, buf: &mut String) -> io::Result<usize> {
-        self.reader.read_line(buf)
-    }
-
-    fn send_single_line(&mut self, s: String) -> io::Result<()> {
-        self.writer.write(s.as_bytes())?;
-        self.writer.flush()?;
+    pub fn send_single_line<T: Display>(&mut self, s: T) -> io::Result<()> {
+        self.0.write(format!("{s}").as_bytes())?;
+        self.0.flush()?;
         Ok(())
     }
 
-    fn go(&mut self, limit: Limit) -> io::Result<Bestmove> {
+    pub fn go(&mut self, limit: Limit) -> io::Result<()> {
         match limit {
             Limit::Movetime(t) => self.send_single_line(format!("go movetime {t}\n"))?,
             Limit::Depth(d) => self.send_single_line(format!("go depth {d}\n"))?,
             Limit::Node(n) => self.send_single_line(format!("go depth {n}\n"))?,
         };
-
-        let mut buf = String::new();
-        loop {
-            self.read_line(&mut buf)?;
-            let mut words = buf[0..(buf.len()-1)].split(' ');
-            if let Some("bestmove") = words.next() {
-                match words.collect::<Vec<&str>>()[..] {
-                    [bestmove, "ponder", pondermove, ..] => break Ok(Bestmove {bestmove: bestmove.to_owned(), pondermove: pondermove.to_owned()}),
-                    [bestmove, ..] => break Ok(Bestmove {bestmove: bestmove.to_owned(), pondermove: String::new()}),
-                    _ => {},
-                }
-            }
-            buf.clear();
-        }
+        Ok(())
     }
 
-    fn update_pos(&mut self, pos: &EnginePos) -> io::Result<()> {
+    pub fn stop(&mut self) -> io::Result<()> {
+        self.send_single_line("stop\n")
+    }
+
+    pub fn update_pos(&mut self, pos: &EnginePos) -> io::Result<()> {
         let fen = Fen::from_position((*pos).clone(), EnPassantMode::Legal);
         self.send_single_line(format!("position fen {fen}\n"))?;
         Ok(())
     }
 
-    
     pub fn setoption<T: Display>(&mut self, name: &str, value: T) -> io::Result<()> {
         self.send_single_line(format!("setoption name {name} value {value}\n"))?;
         Ok(())
     }
 }
 
-impl MovePlayer for Engine {
-    fn bestmove(&mut self, limit: Limit) -> Bestmove {
-        self.go(limit).unwrap()
+impl EngineOutput {
+    fn new(stdout: ChildStdout) -> Self {
+        Self(BufReader::new(stdout))
     }
 
-    fn pos(&mut self, pos: &EnginePos) {
-        self.update_pos(pos).unwrap();
+    fn read_line(&mut self, buf: &mut String) -> io::Result<usize> {
+        self.0.read_line(buf)
+    }
+
+    pub fn input(&mut self) -> io::Result<EngSend> {
+        let mut buf = String::new();
+        self.read_line(&mut buf)?;
+        Ok(EngSend::from(buf.as_str()))
     }
 }
 
-pub struct EnginePos {
-    pos: Chess
+pub struct Engine {
+    _child: Child,
+    pub input: EngineInput,
+    pub output: EngineOutput,
 }
+
+impl Engine {
+    pub fn new(command: &str, args: Option<&Vec<String>>) -> io::Result<Self> {
+        let mut child = Command::new(command);
+        child.stdin(Stdio::piped()).stdout(Stdio::piped());
+        if let Some(args) = args {
+            child.args(args);
+        }
+        let mut child = child.spawn()?;
+        let output = EngineOutput::new(child.stdout.take().unwrap());
+        let input = EngineInput::new(child.stdin.take().unwrap());
+
+        Ok(Engine {
+            _child: child,
+            input,
+            output,
+        })
+    }
+}
+
+#[derive(Deref, DerefMut)]
+pub struct EnginePos(Chess);
 
 impl EnginePos {
     pub fn new() -> Self {
-        EnginePos {pos: Chess::new()}
+        EnginePos(Chess::new())
     }
 
     pub fn play_move(&mut self, mv: &str) {
-        let mv = mv.parse::<San>().expect("Invalid san").to_move(&self.pos).expect("Invalid move");
-        self.pos.play_unchecked(&mv);
+        let mv = mv
+            .parse::<San>()
+            .expect("Invalid san")
+            .to_move(&self.0)
+            .expect("Invalid move");
+        self.play_unchecked(&mv);
     }
 
     pub fn set_pos(&mut self, fen: &str) {
         let fen = fen.parse::<Fen>().expect("Incorrect fen");
-        self.pos = fen.into_position(CastlingMode::Standard).expect("Wrong position");
-    }
-}
-
-impl Deref for EnginePos {
-    type Target = Chess;
-    fn deref(&self) -> &Self::Target {
-        &self.pos
-    }
-}
-
-
-pub struct RandomMover{
-    pos: Chess,
-    rng: ThreadRng,
-}
-
-impl RandomMover {
-    pub fn new() -> Self {
-        RandomMover {pos: Chess::new(), rng: rand::thread_rng()}
-    }
-}
-
-
-impl MovePlayer for RandomMover {
-    fn bestmove(&mut self, _limit: Limit) -> Bestmove {
-        let mut gen = |pos: &Chess| {
-            let mut moves = pos.legal_moves();
-            let r = self.rng.gen_range(0..moves.len());
-            moves.pop_at(r)
-        };
-
-        let mut new_pos = self.pos.clone();
-        let bm = gen(&self.pos).expect("No more legal moves");
-        new_pos.play_unchecked(&bm);
-        let bm = bm.to_uci(CastlingMode::Standard).to_string();
-        let pm = gen(&new_pos).and_then(|p| Some(p.to_uci(CastlingMode::Standard).to_string())).unwrap_or(String::new());
-
-        Bestmove {bestmove: bm, pondermove: pm}
-    }
-
-    fn pos(&mut self, pos: &EnginePos) {
-        self.pos = (*pos).clone();
+        self.0 = fen
+            .into_position(CastlingMode::Standard)
+            .expect("Wrong position");
     }
 }
