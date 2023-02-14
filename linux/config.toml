@@ -1,5 +1,4 @@
-limit = {movetime = 1000}
-random_moves = false
+movetime = 1000
 
 [engine]
 command = "stockfish"

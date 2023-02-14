@@ -8,24 +8,25 @@ The configuration is done via a TOML file called `config.toml` which is expected
 
 |Option            | Value                            | Description                                             |
 |----------------- | -------------------------------- | ------------------------------------------------------- |
-|random_moves      | boolean value; true or false     | If set to true, it plays random moves.                  |
-|engine_command    | path to an engine                | Should be set to the path of the desired engine.        |
-|hash              | positive whole integer value     | The hash size to be used by the engine.                 |
-|threads           | positive whole integer value     | The number of threads to be used by the engine.         |
-|engine_debug_file  | path                             | Optional debug log file path to be used by the engine.   |
-|limit             | time or depth as a nested option | The limit to be used for calculating moves.             |
-|                  | time                             | The time given for each move in miliseconds.            |
-|                  | depth                            | The depth given for each move.                          |
-|                  |                                  | Note: Only one of time or depth can be provided         |
+|engine            | table                            | describes engine behaviour
+|  command         | string                           | command to execute the engine                           |
+|  args            | optional; array of strings       | arguments to give to the engine                         |
+|  config          | table                            | [UCI option] = [value] table to set UCI options; use "_"|
+|                  |                                  | if the option has a space in it                         |
+|movetime          | integer                          | time to spend per move                                  |
+|depth             | integer                          | depth per move                                          |
+|node              | integer                          | nodes per move                                          |
 
 This is a basic example which you can use:
 
 ```toml
-random_moves = true
-engine_command = "stockfish"
+movetime = 1000
+
+[engine]
+command = "stockfish"
+
+[engine.config]
 hash = 128
-threads = 2
-limit = {movetime = 1000}
 ```
 Make a new file in the directory called `config.toml` and paste the above to get started.
 
