@@ -20,12 +20,14 @@ pub struct ConfigOptions {
 }
 
 impl ConfigOptions {
+    // Gets all the config options from hardcoded config file.
     pub fn get_options() -> ConfigOptions {
         let buf = std::fs::read_to_string("config.toml")
             .unwrap_or_else(|e| panic!("Could not open config.toml: {e}"));
         toml::from_str(&buf).expect("Unable to parse config.toml.")
     }
 
+    // Sets up an engine with the config options.
     pub fn setup_engine(&self) -> io::Result<Engine> {
         let mut engine = Engine::new(&self.engine.command, self.engine.args.as_ref())?;
 

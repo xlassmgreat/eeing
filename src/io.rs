@@ -1,3 +1,4 @@
+// Module to handle communications with the browser plugins
 pub mod plugin {
     use super::super::engine::EngSend;
     use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
@@ -7,6 +8,7 @@ pub mod plugin {
 
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
+    // Input about the position from the plugin.
     pub enum PosInp {
         Moves(Vec<String>),
         Fen(String),
@@ -15,6 +17,7 @@ pub mod plugin {
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
     #[serde(tag = "cmd")]
+    // Input from the plugin
     pub enum Inp {
         Go,
         Pos(PosInp),
@@ -22,9 +25,11 @@ pub mod plugin {
     }
 
     #[derive(Deref, DerefMut)]
+    // Receiver of information from plugins
     pub struct Receiver(BufReader<Stdin>);
 
     #[derive(Deref, DerefMut)]
+    // Sender of information to plugins
     pub struct Sender(BufWriter<Stdout>);
 
     impl Receiver {

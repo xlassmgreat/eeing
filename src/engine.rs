@@ -15,6 +15,7 @@ pub struct Bestmove {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+// Struct containing the "info" from engines
 pub struct Info {
     raw: String,
     // More fields with some parsing expected in the future
@@ -22,6 +23,7 @@ pub struct Info {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+// Engine data to send to an Engine
 pub enum EngSend {
     Bestmove(Bestmove),
     Info(Info),
@@ -61,6 +63,7 @@ pub enum Limit {
 pub struct EngineInput(BufWriter<ChildStdin>);
 pub struct EngineOutput(BufReader<ChildStdout>);
 
+// Struct to give input to an engine
 impl EngineInput {
     fn new(stdin: ChildStdin) -> Self {
         Self(BufWriter::new(stdin))
@@ -72,6 +75,7 @@ impl EngineInput {
         Ok(())
     }
 
+    // Sends a "go" command to the engine
     pub fn go(&mut self, limit: Limit) -> io::Result<()> {
         match limit {
             Limit::Movetime(t) => self.send_single_line(format!("go movetime {t}\n"))?,
@@ -81,22 +85,26 @@ impl EngineInput {
         Ok(())
     }
 
+    // Sends a "stop" command to the engine
     pub fn stop(&mut self) -> io::Result<()> {
         self.send_single_line("stop\n")
     }
 
+    // Updates the position of the engine.
     pub fn update_pos(&mut self, pos: &EnginePos) -> io::Result<()> {
         let fen = Fen::from_position((*pos).clone(), EnPassantMode::Legal);
         self.send_single_line(format!("position fen {fen}\n"))?;
         Ok(())
     }
 
+    // Sets the given option to the given value
     pub fn setoption<T: Display>(&mut self, name: &str, value: T) -> io::Result<()> {
         self.send_single_line(format!("setoption name {name} value {value}\n"))?;
         Ok(())
     }
 }
 
+// Struct to read output from the engine
 impl EngineOutput {
     fn new(stdout: ChildStdout) -> Self {
         Self(BufReader::new(stdout))
@@ -113,6 +121,7 @@ impl EngineOutput {
     }
 }
 
+// Struct to represent the engine
 pub struct Engine {
     _child: Child,
     pub input: EngineInput,
@@ -139,6 +148,7 @@ impl Engine {
 }
 
 #[derive(Deref, DerefMut)]
+// Struct to represent the position given to the engine
 pub struct EnginePos(Chess);
 
 impl EnginePos {
