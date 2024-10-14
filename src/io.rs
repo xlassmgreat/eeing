@@ -1,10 +1,30 @@
 // Module to handle communications with the browser plugins
+//
+
+use serde::Serialize;
+
+#[derive(Serialize)]
+pub struct ErrorSend<ERR: Serialize, IDENT: Serialize> {
+    error: ERR,
+    identification: IDENT,
+}
+
+impl<ERR: Serialize, IDENT: Serialize> ErrorSend<ERR, IDENT> {
+    pub fn new(error: ERR, identification: IDENT) -> Self {
+        Self {
+            error,
+            identification,
+        }
+    }
+}
+
 pub mod plugin {
-    use super::super::engine::EngSend;
-    use byteorder::{NativeEndian, ReadBytesExt, WriteBytesExt};
     use derive_more::{Deref, DerefMut};
-    use serde::Deserialize;
-    use std::io::{self, stdin, stdout, BufReader, BufWriter, Read, Stdin, Stdout, Write};
+    use serde::{de::DeserializeOwned, Deserialize, Serialize};
+    use std::{io, u32};
+    use tokio::io::{
+        stdin, stdout, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter, Stdin, Stdout,
+    };
 
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -37,15 +57,15 @@ pub mod plugin {
             Self(BufReader::new(stdin()))
         }
 
-        pub fn receive(&mut self) -> io::Result<Inp> {
-            let size = self.read_u32::<NativeEndian>()?;
+        pub async fn receive<T: DeserializeOwned>(&mut self) -> io::Result<Option<T>> {
+            let size = self.read_u32().await?.to_be();
+
             let mut buf = vec![0; size as usize];
-            self.read_exact(&mut buf)?;
+            self.read_exact(&mut buf).await?;
             // The json is probably right, so something did go very wrong if it fails to unwrap.
-            Ok(
-                serde_json::from_slice(&buf)
-                    .unwrap_or_else(|e| panic!("Failed decoding json: {e}")),
-            )
+            Ok(serde_json::from_slice(&buf)
+                .inspect_err(|e| log::error!("Failed decoding json: {e}"))
+                .ok())
         }
     }
 
@@ -54,14 +74,19 @@ pub mod plugin {
             Self(BufWriter::new(stdout()))
         }
 
-        pub fn send(&mut self, b: EngSend) -> io::Result<()> {
+        pub async fn send<T: Serialize>(&mut self, b: T) -> io::Result<()> {
             let buf = serde_json::to_string(&b)
-                .unwrap_or_else(|e| panic!("Error deserializing JSON: {e}"));
+                .inspect_err(|e| log::error!("Error deserializing JSON: {e}"))
+                .ok();
 
-            let l = buf.len() as u32;
-            self.write_u32::<NativeEndian>(l)?;
-            self.write_all(buf.as_bytes())?;
-            self.flush()?;
+            if let Some(buf) = buf {
+                let l = (buf.len() as u32).to_be();
+
+                self.write_u32(l).await?;
+                self.write_all(buf.as_bytes()).await?;
+                self.flush().await?;
+            }
+
             Ok(())
         }
     }

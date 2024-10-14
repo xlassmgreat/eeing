@@ -1,11 +1,13 @@
 use derive_more::{Deref, DerefMut};
 use serde::{Deserialize, Serialize};
 use shakmaty::{fen::Fen, san::San, CastlingMode, Chess, EnPassantMode, Position};
-use std::{
-    fmt::Display,
-    io::{self, BufRead, BufReader, BufWriter, Write},
-    process::{Child, ChildStdin, ChildStdout, Command, Stdio},
+use std::{fmt::Display, io, process::Stdio};
+use tokio::{
+    io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter},
+    process::{Child, ChildStdin, ChildStdout, Command},
 };
+
+use crate::io::ErrorSend;
 
 #[derive(Serialize)]
 pub struct Bestmove {
@@ -27,6 +29,7 @@ pub struct Info {
 pub enum EngSend {
     Bestmove(Bestmove),
     Info(Info),
+    Unusual(String),
 }
 
 impl From<&str> for EngSend {
@@ -42,7 +45,7 @@ impl From<&str> for EngSend {
                     bestmove: bm.to_owned(),
                     pondermove: String::new(),
                 }),
-                _ => panic!("Engine output wrong"),
+                _ => EngSend::Unusual(value.to_owned()),
             }
         } else {
             EngSend::Info(Info {
@@ -52,7 +55,7 @@ impl From<&str> for EngSend {
     }
 }
 
-#[derive(Deserialize, Clone, Copy)]
+#[derive(Deserialize, Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum Limit {
     Movetime(u32),
@@ -69,37 +72,39 @@ impl EngineInput {
         Self(BufWriter::new(stdin))
     }
 
-    pub fn send_single_line<T: Display>(&mut self, s: T) -> io::Result<()> {
-        self.0.write(format!("{s}").as_bytes())?;
-        self.0.flush()?;
+    pub async fn send_single_line<T: Display>(&mut self, s: T) -> io::Result<()> {
+        self.0.write(format!("{s}").as_bytes()).await?;
+        self.0.flush().await?;
         Ok(())
     }
 
     // Sends a "go" command to the engine
-    pub fn go(&mut self, limit: Limit) -> io::Result<()> {
+    pub async fn go(&mut self, limit: Limit) -> io::Result<()> {
         match limit {
-            Limit::Movetime(t) => self.send_single_line(format!("go movetime {t}\n"))?,
-            Limit::Depth(d) => self.send_single_line(format!("go depth {d}\n"))?,
-            Limit::Node(n) => self.send_single_line(format!("go depth {n}\n"))?,
+            Limit::Movetime(t) => self.send_single_line(format!("go movetime {t}\n")).await?,
+            Limit::Depth(d) => self.send_single_line(format!("go depth {d}\n")).await?,
+            Limit::Node(n) => self.send_single_line(format!("go depth {n}\n")).await?,
         };
         Ok(())
     }
 
     // Sends a "stop" command to the engine
-    pub fn stop(&mut self) -> io::Result<()> {
-        self.send_single_line("stop\n")
+    pub async fn stop(&mut self) -> io::Result<()> {
+        self.send_single_line("stop\n").await
     }
 
     // Updates the position of the engine.
-    pub fn update_pos(&mut self, pos: &EnginePos) -> io::Result<()> {
+    pub async fn update_pos(&mut self, pos: &EnginePos) -> io::Result<()> {
         let fen = Fen::from_position((*pos).clone(), EnPassantMode::Legal);
-        self.send_single_line(format!("position fen {fen}\n"))?;
+        self.send_single_line(format!("position fen {fen}\n"))
+            .await?;
         Ok(())
     }
 
     // Sets the given option to the given value
-    pub fn setoption<T: Display>(&mut self, name: &str, value: T) -> io::Result<()> {
-        self.send_single_line(format!("setoption name {name} value {value}\n"))?;
+    pub async fn setoption<T: Display>(&mut self, name: &str, value: T) -> io::Result<()> {
+        self.send_single_line(format!("setoption name {name} value {value}\n"))
+            .await?;
         Ok(())
     }
 }
@@ -110,13 +115,13 @@ impl EngineOutput {
         Self(BufReader::new(stdout))
     }
 
-    fn read_line(&mut self, buf: &mut String) -> io::Result<usize> {
-        self.0.read_line(buf)
+    async fn read_line(&mut self, buf: &mut String) -> io::Result<usize> {
+        self.0.read_line(buf).await
     }
 
-    pub fn input(&mut self) -> io::Result<EngSend> {
+    pub async fn input(&mut self) -> io::Result<EngSend> {
         let mut buf = String::new();
-        self.read_line(&mut buf)?;
+        self.read_line(&mut buf).await?;
         Ok(EngSend::from(buf.as_str()))
     }
 }
@@ -151,24 +156,51 @@ impl Engine {
 // Struct to represent the position given to the engine
 pub struct EnginePos(Chess);
 
+#[derive(Serialize)]
+pub enum PlayMoveError {
+    InvalidSan,
+    InvalidMove,
+}
+
+#[derive(Serialize)]
+pub enum SetPosError {
+    IncorrectFen,
+    WrongPosition,
+}
+
+#[derive(Serialize)]
+pub enum ErrorFromEngine {
+    PlayMoveError(ErrorSend<PlayMoveError, String>),
+    SetPosError(ErrorSend<SetPosError, String>),
+}
+
+#[derive(Serialize)]
+pub struct MoveIdentification {
+    #[serde(rename = "move")]
+    pmove: String,
+}
+
 impl EnginePos {
     pub fn new() -> Self {
         EnginePos(Chess::new())
     }
 
-    pub fn play_move(&mut self, mv: &str) {
-        let mv = mv
-            .parse::<San>()
-            .expect("Invalid san")
-            .to_move(&self.0)
-            .expect("Invalid move");
-        self.play_unchecked(&mv);
+    pub fn play_move(&mut self, mv: &str) -> Result<(), PlayMoveError> {
+        let mv = mv.parse::<San>().map_err(|_| PlayMoveError::InvalidSan);
+
+        let mv = mv.and_then(|x| x.to_move(&self.0).map_err(|_| PlayMoveError::InvalidMove));
+
+        mv.map(|m| self.play_unchecked(&m))
     }
 
-    pub fn set_pos(&mut self, fen: &str) {
-        let fen = fen.parse::<Fen>().expect("Incorrect fen");
-        self.0 = fen
-            .into_position(CastlingMode::Standard)
-            .expect("Wrong position");
+    pub fn set_pos(&mut self, fen: &str) -> Result<(), SetPosError> {
+        let fen = fen.parse::<Fen>().map_err(|_| SetPosError::IncorrectFen);
+
+        let pos = fen.and_then(|x| {
+            x.into_position(CastlingMode::Standard)
+                .map_err(|_| SetPosError::WrongPosition)
+        });
+
+        pos.map(|p| self.0 = p)
     }
 }
