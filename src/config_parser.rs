@@ -3,25 +3,22 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::Limit;
-use std::{
-    collections::HashMap,
-    fs::File,
-    io::{self, Read},
-};
-use toml::Value;
+use serde_json::Value;
+use std::{collections::HashMap, io};
+use tokio::{fs::File, io::AsyncReadExt};
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone)]
 struct Eng {
     command: String,
     args: Option<Vec<String>>,
     config: Option<HashMap<String, Value>>,
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Deserialize, Serialize, Clone)]
 pub struct ConfigOptions {
-    engine: Eng,
+    pub engine: Eng,
     #[serde(flatten)]
-    limit: Limit,
+    pub limit: Limit,
 }
 
 impl Default for ConfigOptions {
@@ -56,11 +53,11 @@ pub struct Configurer {
 }
 
 impl Configurer {
-    pub fn new() -> Self {
-        let file = ConfigOptions::get_file();
+    pub async fn new() -> Self {
+        let file = ConfigOptions::get_file().await;
 
         let (write, opt, file, report) = if let Ok(mut file) = file {
-            let (write, opt, report) = match ConfigOptions::get_options(&mut file) {
+            let (write, opt, report) = match ConfigOptions::get_options(&mut file).await {
                 Ok(opt) => (false, Some(opt), None),
                 Err(e) => {
                     let write = match e {
@@ -87,15 +84,16 @@ impl Configurer {
 }
 
 impl ConfigOptions {
-    fn get_file() -> io::Result<File> {
+    async fn get_file() -> io::Result<File> {
         File::options()
             .create(true)
             .write(true)
             .read(true)
             .open("config.json")
+            .await
     }
 
-    fn get_options(file: &mut File) -> Result<ConfigOptions, GetOptionError> {
+    async fn get_options(file: &mut File) -> Result<ConfigOptions, GetOptionError> {
         let mut buf = String::new();
 
         if buf.len() == 0 {
@@ -103,6 +101,7 @@ impl ConfigOptions {
         }
 
         file.read_to_string(&mut buf)
+            .await
             .map_err(|_| GetOptionError::Read)?;
 
         let parsed =

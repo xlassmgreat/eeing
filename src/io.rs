@@ -1,30 +1,14 @@
 // Module to handle communications with the browser plugins
-//
-
-use serde::Serialize;
-
-#[derive(Serialize)]
-pub struct ErrorSend<ERR: Serialize, IDENT: Serialize> {
-    error: ERR,
-    identification: IDENT,
-}
-
-impl<ERR: Serialize, IDENT: Serialize> ErrorSend<ERR, IDENT> {
-    pub fn new(error: ERR, identification: IDENT) -> Self {
-        Self {
-            error,
-            identification,
-        }
-    }
-}
 
 pub mod plugin {
     use derive_more::{Deref, DerefMut};
-    use serde::{de::DeserializeOwned, Deserialize, Serialize};
+    use serde::{de::DeserializeOwned, Deserialize};
     use std::{io, u32};
     use tokio::io::{
         stdin, stdout, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter, Stdin, Stdout,
     };
+
+    use crate::{config_parser::ConfigOptions, engine::PlugSend};
 
     #[derive(Deserialize)]
     #[serde(rename_all = "camelCase")]
@@ -38,10 +22,15 @@ pub mod plugin {
     #[serde(rename_all = "camelCase")]
     #[serde(tag = "cmd")]
     // Input from the plugin
-    pub enum Inp {
+    pub enum Cmd {
         Go,
         Pos(PosInp),
         Stop,
+    }
+
+    #[derive(Deserialize)]
+    pub enum Inp {
+        Cmd(Cmd),
     }
 
     #[derive(Deref, DerefMut)]
@@ -74,7 +63,7 @@ pub mod plugin {
             Self(BufWriter::new(stdout()))
         }
 
-        pub async fn send<T: Serialize>(&mut self, b: T) -> io::Result<()> {
+        pub async fn send(&mut self, b: PlugSend) -> io::Result<()> {
             let buf = serde_json::to_string(&b)
                 .inspect_err(|e| log::error!("Error deserializing JSON: {e}"))
                 .ok();

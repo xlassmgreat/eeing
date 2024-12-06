@@ -7,8 +7,6 @@ use tokio::{
     process::{Child, ChildStdin, ChildStdout, Command},
 };
 
-use crate::io::ErrorSend;
-
 #[derive(Serialize)]
 pub struct Bestmove {
     pub bestmove: String,
@@ -25,30 +23,39 @@ pub struct Info {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(tag = "returned")]
+pub enum PlugSend {
+    FromEngOut(FromEngOut),
+    BoardError(BoardErrorSend),
+    NoEngine()
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 // Engine data to send to an Engine
-pub enum EngSend {
+pub enum FromEngOut {
     Bestmove(Bestmove),
     Info(Info),
     Unusual(String),
 }
 
-impl From<&str> for EngSend {
+impl From<&str> for FromEngOut {
     fn from(value: &str) -> Self {
         let mut words = value.split(' ');
         if let Some("bestmove") = words.next() {
             match words.collect::<Vec<&str>>()[..] {
-                [bm, "pondermove", pm] => EngSend::Bestmove(Bestmove {
+                [bm, "pondermove", pm] => Self::Bestmove(Bestmove {
                     bestmove: bm.to_owned(),
                     pondermove: pm.to_owned(),
                 }),
-                [bm, ..] => EngSend::Bestmove(Bestmove {
+                [bm, ..] => Self::Bestmove(Bestmove {
                     bestmove: bm.to_owned(),
                     pondermove: String::new(),
                 }),
-                _ => EngSend::Unusual(value.to_owned()),
+                _ => Self::Unusual(value.to_owned()),
             }
         } else {
-            EngSend::Info(Info {
+            Self::Info(Info {
                 raw: value.to_owned(),
             })
         }
@@ -119,10 +126,10 @@ impl EngineOutput {
         self.0.read_line(buf).await
     }
 
-    pub async fn input(&mut self) -> io::Result<EngSend> {
+    pub async fn input(&mut self) -> io::Result<FromEngOut> {
         let mut buf = String::new();
         self.read_line(&mut buf).await?;
-        Ok(EngSend::from(buf.as_str()))
+        Ok(FromEngOut::from(buf.as_str()))
     }
 }
 
@@ -169,15 +176,32 @@ pub enum SetPosError {
 }
 
 #[derive(Serialize)]
-pub enum ErrorFromEngine {
-    PlayMoveError(ErrorSend<PlayMoveError, String>),
-    SetPosError(ErrorSend<SetPosError, String>),
+pub enum BoardError {
+    PlayMoveError(PlayMoveError),
+    SetPosError(SetPosError),
 }
 
 #[derive(Serialize)]
-pub struct MoveIdentification {
+pub struct BoardErrorSend {
+    error: BoardError,
+    identification: MoveIdentification,
+}
+
+impl BoardErrorSend {
+    pub fn new(error: BoardError, identification: MoveIdentification) -> Self {
+        Self {
+            error,
+            identification,
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum MoveIdentification {
     #[serde(rename = "move")]
-    pmove: String,
+    PMove(String),
+    Fen(String),
 }
 
 impl EnginePos {

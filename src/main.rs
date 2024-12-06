@@ -2,6 +2,7 @@ mod config_parser;
 mod engine;
 mod io;
 mod listener;
+mod engine_manager;
 use std::io::Write;
 
 use anyhow::Result;
@@ -9,8 +10,8 @@ use anyhow::Result;
 use config_parser::ConfigOptions;
 use engine::{Engine, Limit};
 
-async fn run(mut engine: Engine, limit: Limit) -> Result<()> {
-    let plug = listener::plugin_listener(&mut engine.input, limit);
+async fn run(mut engine: Engine, config: ConfigOptions) -> Result<()> {
+    let plug = listener::plugin_listener(&mut engine.input, config);
     let eng = listener::engine_listener(&mut engine.output);
 
     tokio::try_join!(plug, eng)?;
@@ -28,16 +29,16 @@ async fn main() -> Result<()> {
 
     configurer
         .report
-        .map(|r| log::warn!("Something wrong with configuration: {r}"));
+        .map(|r| log::error!("Something wrong with configuration: {r}"));
 
     if let Some(mut file) = configurer.file {
         if configurer.write {
-            let text = serde_json::to_string(&ConfigOptions::default()).unwrap();
+            let text = serde_json::to_string_pretty(&ConfigOptions::default()).unwrap();
             file.write_all(text.as_bytes())
-                .unwrap_or_else(|e| log::warn!("Unable to write to configuration file: {e}"));
+                .unwrap_or_else(|e| log::error!("Unable to write to configuration file: {e}"));
         }
     }
 
-    run(engine, config.limit()).await?;
+    run(engine, config).await?;
     Ok(())
 }
